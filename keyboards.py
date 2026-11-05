@@ -19,3 +19,10 @@ def card(book, favorite):
     f="⭐ Убрать" if favorite else "☆ В любимые"
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📖 Читать",callback_data=f"read:{book['id']}"), InlineKeyboardButton(text=f,callback_data=f"fav:{book['id']}")],[InlineKeyboardButton(text="🔖 Закладка",callback_data=f"mark:{book['id']}"),InlineKeyboardButton(text="🎧 Озвучить",callback_data=f"tts:{book['id']}")],[InlineKeyboardButton(text="↩️ В меню",callback_data="menu:main")]])
 
+def reader(book_id, page, total):
+    buttons=[]
+    if page > 1: buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"page:{book_id}:{page-1}"))
+    if page < total: buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"page:{book_id}:{page+1}"))
+    buttons.append(InlineKeyboardButton(text="🔖 Сохранить прогресс", callback_data=f"savepage:{book_id}:{page}"))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons, [InlineKeyboardButton(text="↩️ К книге", callback_data=f"book:{book_id}")]])
+

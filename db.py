@@ -26,7 +26,8 @@ async def user_list(conn, user_id, kind, page, limit=5):
     total = await conn.fetchval("SELECT count(*) " + base, user_id)
     order = "ub.last_opened_at DESC NULLS LAST" if kind == "recent" else "b.title"
     if kind == "recent":
-        rows = await conn.fetch(f"SELECT * {base} ORDER BY {order} LIMIT 20 OFFSET $2", user_id, offset)
+        # Ограничиваем историю 20 записями, но выдаём пользователю по 5 за страницу.
+        rows = await conn.fetch(f"SELECT * FROM (SELECT * {base} ORDER BY {order} LIMIT 20) recent_books LIMIT $2 OFFSET $3", user_id, limit, offset)
         total = min(total, 20)
     else:
         rows = await conn.fetch(f"SELECT * {base} ORDER BY {order} LIMIT $2 OFFSET $3", user_id, limit, offset)

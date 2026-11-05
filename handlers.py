@@ -5,11 +5,45 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from db import connection, search, user_list
-from keyboards import menu, back_menu, books, card
+from keyboards import menu, back_menu, books, card, reader
+from config import ADMIN_IDS, BOOK_PAGE_SIZE
 from tts import chunks
 
 router=Router(); log=logging.getLogger(__name__)
 class SearchState(StatesGroup): query=State()
+
+def is_admin(user_id): return user_id in ADMIN_IDS
+
+@router.message(F.text.startswith("/admin_add"))
+async def admin_add(m: Message):
+    if not is_admin(m.from_user.id): return await m.answer("Недостаточно прав.")
+    parts=m.text.split("|", 3)
+    if len(parts) < 3: return await m.answer("Формат: /admin_add | Название | Автор | Текст книги")
+    _, title, author, *text = parts
+    async with connection() as c:
+        bid=await c.fetchval("INSERT INTO books(title,author,text_content) VALUES($1,$2,$3) RETURNING id",title.strip(),author.strip(),text[0].strip() if text else None)
+        if text and text[0].strip():
+            content=text[0].strip(); pages=[]; start=0
+            while start < len(content):
+                end=min(start+BOOK_PAGE_SIZE,len(content)); boundary=max(content.rfind("\n",start,end),content.rfind(". ",start,end))
+                if boundary > start+BOOK_PAGE_SIZE//2: end=boundary+1
+                pages.append(content[start:end].strip()); start=end
+            await c.executemany("INSERT INTO book_pages(book_id,page_no,content) VALUES($1,$2,$3)",[(bid,i+1,p) for i,p in enumerate(pages) if p])
+    await m.answer(f"Книга добавлена, id={bid}.")
+
+@router.message(F.text.startswith("/admin_delete"))
+async def admin_delete(m: Message):
+    if not is_admin(m.from_user.id): return await m.answer("Недостаточно прав.")
+    try: bid=int(m.text.split(maxsplit=1)[1])
+    except (ValueError, IndexError): return await m.answer("Формат: /admin_delete <id>")
+    async with connection() as c: result=await c.execute("DELETE FROM books WHERE id=$1",bid)
+    await m.answer("Книга удалена." if result.endswith("1") else "Книга не найдена.")
+
+@router.message(F.text == "/admin_books")
+async def admin_books(m: Message):
+    if not is_admin(m.from_user.id): return await m.answer("Недостаточно прав.")
+    async with connection() as c: rows=await c.fetch("SELECT id,title,author FROM books ORDER BY id DESC LIMIT 50")
+    await m.answer("\n".join(f"{r['id']}. {r['title']} — {r['author']}" for r in rows) or "Каталог пуст.")
 
 async def show_list(target, user_id, kind, page=0):
     async with connection() as c:
@@ -24,15 +58,21 @@ async def start(m: Message, state: FSMContext): await state.clear(); await m.ans
 async def ask_search(m: Message, state: FSMContext): await state.set_state(SearchState.query); await m.answer("Введите название книги или автора:")
 @router.message(SearchState.query)
 async def do_search(m: Message, state: FSMContext):
-    q=m.text.strip(); await state.update_data(query=q); await state.clear()
+    q=m.text.strip(); await state.update_data(query=q)
     async with connection() as c: rows,total=await search(c,q,m.from_user.id,0)
     await m.answer(f"Результаты поиска: {q}" if rows else "Ничего не найдено.", reply_markup=books(rows,0,total,"search") if rows else back_menu())
 @router.message(F.text == "⭐ Любимые")
-async def fav(m: Message): await m.answer("⭐ Любимые");
+async def fav(m: Message):
+    async with connection() as c: rows,total=await user_list(c,m.from_user.id,"fav",0)
+    await m.answer("⭐ Любимые" if rows else "⭐ Любимые\nПока здесь ничего нет.", reply_markup=books(rows,0,total,"fav_page") if rows else back_menu())
 @router.message(F.text == "🔖 Закладки")
-async def mark(m: Message): await m.answer("🔖 Закладки");
+async def mark(m: Message):
+    async with connection() as c: rows,total=await user_list(c,m.from_user.id,"mark",0)
+    await m.answer("🔖 Закладки" if rows else "🔖 Закладки\nПока здесь ничего нет.", reply_markup=books(rows,0,total,"mark_page") if rows else back_menu())
 @router.message(F.text == "🕘 Недавно прочитанные")
-async def recent(m: Message): await m.answer("🕘 Недавно прочитанные");
+async def recent(m: Message):
+    async with connection() as c: rows,total=await user_list(c,m.from_user.id,"recent",0)
+    await m.answer("🕘 Недавно прочитанные" if rows else "🕘 Недавно прочитанные\nПока здесь ничего нет.", reply_markup=books(rows,0,total,"recent_page") if rows else back_menu())
 
 @router.callback_query()
 async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
@@ -48,6 +88,15 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
         await q.message.edit_text(f"Результаты поиска: {qtext}",reply_markup=books(rows,page,total,"search")); return
     bid=int(d.split(":")[1])
     async with connection() as c:
+        if d.startswith("page:"):
+            _, book_id, page = d.split(":"); book_id=int(book_id); page=int(page)
+            row=await c.fetchrow("SELECT b.title,p.content,(SELECT count(*) FROM book_pages WHERE book_id=$1) total FROM book_pages p JOIN books b ON b.id=p.book_id WHERE p.book_id=$1 AND p.page_no=$2",book_id,page)
+            if not row: await q.answer("Страница не найдена",show_alert=True); return
+            await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,book_id,page)
+            await q.message.edit_text(f"📖 {row['title']}\n\n{row['content']}\n\nСтраница {page}/{row['total']}",reply_markup=reader(book_id,page,row['total'])); return
+        if d.startswith("savepage:"):
+            _, book_id, page=d.split(":")
+            await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,int(book_id),int(page)); await q.answer("Прогресс сохранён"); return
         if d.startswith("book:"):
             b=await c.fetchrow("SELECT b.*,COALESCE(ub.is_favorite,FALSE) is_favorite FROM books b LEFT JOIN user_books ub ON ub.book_id=b.id AND ub.user_id=$1 WHERE b.id=$2",uid,bid)
             await q.message.edit_text(f"📚 {b['title']}\nАвтор: {b['author']}\nЖанр: {b['genre'] or '—'}",reply_markup=card(b,b['is_favorite'])); return
@@ -57,7 +106,11 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
         if d.startswith("mark:"):
             await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,bid,1); await q.answer("Закладка сохранена"); return
         if d.startswith("read:"):
-            b=await c.fetchrow("SELECT * FROM books WHERE id=$1",bid); await c.execute("INSERT INTO user_books(user_id,book_id,last_opened_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_opened_at=NOW()",uid,bid)
+            b=await c.fetchrow("SELECT b.*,COALESCE(ub.last_page,1) last_page FROM books b LEFT JOIN user_books ub ON ub.book_id=b.id AND ub.user_id=$1 WHERE b.id=$2",uid,bid); await c.execute("INSERT INTO user_books(user_id,book_id,last_opened_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_opened_at=NOW()",uid,bid)
+            total=await c.fetchval("SELECT count(*) FROM book_pages WHERE book_id=$1",bid)
+            if total:
+                page=min(int(b['last_page']),total); row=await c.fetchrow("SELECT content FROM book_pages WHERE book_id=$1 AND page_no=$2",bid,page)
+                await q.message.answer(f"📖 {b['title']}\n\n{row['content']}\n\nСтраница {page}/{total}",reply_markup=reader(bid,page,total)); return
             if b['file_id']: await bot.send_document(uid,b['file_id'])
             elif b['file_path']: await bot.send_document(uid,FSInputFile(b['file_path']))
             else: await q.answer("Файл книги не загружен",show_alert=True)

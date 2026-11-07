@@ -2,6 +2,8 @@
 
 Бот использует Python 3.11+, aiogram 3, FastAPI, asyncpg, Neon Postgres и edge-tts.
 
+На Vercel Hobby cron в `vercel.json` запускается один раз в сутки (`0 3 * * *`). Для быстрой обработки очереди озвучки вызывайте `/api/cron` внешним cron-сервисом чаще, передавая `Authorization: Bearer CRON_SECRET`, либо используйте Vercel Pro.
+
 ## Расширенные возможности
 
 - Книги с текстом читаются постранично. Каждое открытие сохраняет `last_page` и `last_opened_at`, поэтому кнопка чтения продолжает с последнего места.

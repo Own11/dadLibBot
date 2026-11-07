@@ -1,5 +1,23 @@
 # Book Reader Telegram Bot
 
+## GitHub и деплой
+
+Перед публикацией проверьте, что `.env` не попадает в Git: он исключён через `.gitignore`. Секреты задаются только в Vercel Environment Variables. Тексты книг в `book_texts/*.txt` также исключены из GitHub; загрузите их отдельно в Neon через `python import_books.py` или храните в приватном хранилище.
+
+Для первой публикации:
+
+```bash
+git init
+git add .
+git status
+git commit -m "Prepare Telegram book bot"
+git branch -M main
+git remote add origin https://github.com/USERNAME/REPOSITORY.git
+git push -u origin main
+```
+
+Перед `git commit` убедитесь, что в выводе `git status` нет `.env`, токенов или больших TXT-файлов.
+
 Бот использует Python 3.11+, aiogram 3, FastAPI, asyncpg, Neon Postgres и edge-tts.
 
 На Vercel Hobby cron в `vercel.json` запускается один раз в сутки (`0 3 * * *`). Для быстрой обработки очереди озвучки вызывайте `/api/cron` внешним cron-сервисом чаще, передавая `Authorization: Bearer CRON_SECRET`, либо используйте Vercel Pro.

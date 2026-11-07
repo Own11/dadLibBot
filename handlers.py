@@ -8,6 +8,7 @@ from db import connection, search, user_list
 from keyboards import menu, back_menu, books, card, reader
 from config import ADMIN_IDS, BOOK_PAGE_SIZE
 from tts import chunks
+from import_books import split_pages
 
 router=Router(); log=logging.getLogger(__name__)
 class SearchState(StatesGroup): query=State()
@@ -108,6 +109,11 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
         if d.startswith("read:"):
             b=await c.fetchrow("SELECT b.*,COALESCE(ub.last_page,1) last_page FROM books b LEFT JOIN user_books ub ON ub.book_id=b.id AND ub.user_id=$1 WHERE b.id=$2",uid,bid); await c.execute("INSERT INTO user_books(user_id,book_id,last_opened_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_opened_at=NOW()",uid,bid)
             total=await c.fetchval("SELECT count(*) FROM book_pages WHERE book_id=$1",bid)
+            # Для старых записей создаём страницы лениво из text_content.
+            if not total and b['text_content']:
+                page_rows=split_pages(b['text_content'])
+                await c.executemany("INSERT INTO book_pages(book_id,page_no,content) VALUES($1,$2,$3) ON CONFLICT(book_id,page_no) DO NOTHING",[(bid,i+1,p) for i,p in enumerate(page_rows)])
+                total=len(page_rows)
             if total:
                 page=min(int(b['last_page']),total); row=await c.fetchrow("SELECT content FROM book_pages WHERE book_id=$1 AND page_no=$2",bid,page)
                 await q.message.answer(f"📖 {b['title']}\n\n{row['content']}\n\nСтраница {page}/{total}",reply_markup=reader(bid,page,total)); return

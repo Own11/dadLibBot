@@ -4,7 +4,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, FSInputFile
-from db import connection, search, user_list
+from db import connection, search, user_list, all_books
 from keyboards import menu, back_menu, books, card, reader
 from config import ADMIN_IDS, BOOK_PAGE_SIZE
 from tts import chunks
@@ -58,6 +58,10 @@ async def show_list(target, user_id, kind, page=0):
 async def start(m: Message, state: FSMContext): await state.clear(); await m.answer("Добро пожаловать в библиотеку!", reply_markup=menu())
 @router.message(F.text == "🔎 Поиск")
 async def ask_search(m: Message, state: FSMContext): await state.set_state(SearchState.query); await m.answer("Введите название книги или автора:")
+@router.message(F.text == "📚 Все книги")
+async def all_books_message(m: Message):
+    async with connection() as c: rows,total=await all_books(c,0)
+    await m.answer("📚 Все книги" if rows else "Каталог пуст.", reply_markup=books(rows,0,total,"all_page") if rows else back_menu())
 @router.message(SearchState.query)
 async def do_search(m: Message, state: FSMContext):
     q=m.text.strip(); await state.update_data(query=q)
@@ -82,6 +86,10 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
     if d=="menu:main": await q.message.answer("Главное меню",reply_markup=menu()); return
     if d.startswith("menu:"):
         kind={"menu:fav":"fav","menu:mark":"mark","menu:recent":"recent"}[d]; await show_list(q.message,uid,kind); return
+    if d.startswith("all_page:"):
+        page=int(d.split(":")[1])
+        async with connection() as c: rows,total=await all_books(c,page)
+        await q.message.edit_text("📚 Все книги",reply_markup=books(rows,page,total,"all_page")); return
     if d.startswith(("fav_page:","mark_page:","recent_page:")):
         p=d.split(":"); await show_list(q.message,uid,{"fav_page":"fav","mark_page":"mark","recent_page":"recent"}[p[0]],int(p[1])); return
     if d.startswith("search:"):

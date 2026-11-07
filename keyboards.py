@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 def menu():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🔎 Поиск")], [KeyboardButton(text="⭐ Любимые"), KeyboardButton(text="🔖 Закладки")], [KeyboardButton(text="🕘 Недавно прочитанные")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🔎 Поиск")], [KeyboardButton(text="📚 Все книги")], [KeyboardButton(text="⭐ Любимые"), KeyboardButton(text="🔖 Закладки")], [KeyboardButton(text="🕘 Недавно прочитанные")]], resize_keyboard=True)
 
 def back_menu(): return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ В меню", callback_data="menu:main")]])
 

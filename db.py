@@ -19,6 +19,12 @@ async def search(conn, query, user_id, page, limit=5):
         WHERE b.title ILIKE $1 OR b.author ILIKE $1 ORDER BY b.title LIMIT $3 OFFSET $4""", term, user_id, limit, offset)
     return rows, total
 
+async def all_books(conn, page, limit=5):
+    offset=page*limit
+    total=await conn.fetchval("SELECT count(*) FROM books")
+    rows=await conn.fetch("SELECT * FROM books ORDER BY title LIMIT $1 OFFSET $2",limit,offset)
+    return rows,total
+
 async def user_list(conn, user_id, kind, page, limit=5):
     offset = page * limit
     where = {"fav": "ub.is_favorite = TRUE", "mark": "ub.last_page > 1", "recent": "ub.last_opened_at IS NOT NULL"}[kind]

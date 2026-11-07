@@ -9,6 +9,7 @@ from keyboards import menu, back_menu, books, card, reader
 from config import ADMIN_IDS, BOOK_PAGE_SIZE
 from tts import chunks
 from import_books import split_pages
+from book_content import pages as txt_pages
 
 router=Router(); log=logging.getLogger(__name__)
 class SearchState(StatesGroup): query=State()
@@ -91,6 +92,13 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
     async with connection() as c:
         if d.startswith("page:"):
             _, book_id, page = d.split(":"); book_id=int(book_id); page=int(page)
+            book=await c.fetchrow("SELECT title,author FROM books WHERE id=$1",book_id)
+            txt=txt_pages(book['title'],book['author']) if book else []
+            if txt:
+                page=int(page)
+                if page < 1 or page > len(txt): await q.answer("Страница не найдена",show_alert=True); return
+                await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,book_id,page)
+                await q.message.edit_text(f"📖 {book['title']}\n\n{txt[page-1]}\n\nСтраница {page}/{len(txt)}",reply_markup=reader(book_id,page,len(txt))); return
             row=await c.fetchrow("SELECT b.title,p.content,(SELECT count(*) FROM book_pages WHERE book_id=$1) total FROM book_pages p JOIN books b ON b.id=p.book_id WHERE p.book_id=$1 AND p.page_no=$2",book_id,page)
             if not row: await q.answer("Страница не найдена",show_alert=True); return
             await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,book_id,page)
@@ -108,6 +116,11 @@ async def callbacks(q: CallbackQuery, state: FSMContext, bot: Bot):
             await c.execute("INSERT INTO user_books(user_id,book_id,last_page,last_opened_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_page=$3,last_opened_at=NOW()",uid,bid,1); await q.answer("Закладка сохранена"); return
         if d.startswith("read:"):
             b=await c.fetchrow("SELECT b.*,COALESCE(ub.last_page,1) last_page FROM books b LEFT JOIN user_books ub ON ub.book_id=b.id AND ub.user_id=$1 WHERE b.id=$2",uid,bid); await c.execute("INSERT INTO user_books(user_id,book_id,last_opened_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,book_id) DO UPDATE SET last_opened_at=NOW()",uid,bid)
+            # Основной источник текста — TXT в репозитории, а не Neon.
+            page_rows=txt_pages(b['title'], b['author'])
+            total=len(page_rows)
+            if total:
+                page=min(int(b['last_page']),total); await q.message.answer(f"📖 {b['title']}\n\n{page_rows[page-1]}\n\nСтраница {page}/{total}",reply_markup=reader(bid,page,total)); return
             total=await c.fetchval("SELECT count(*) FROM book_pages WHERE book_id=$1",bid)
             # Для старых записей создаём страницы лениво из text_content.
             if not total and b['text_content']:

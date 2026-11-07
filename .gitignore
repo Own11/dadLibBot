@@ -9,6 +9,6 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
-book_texts/*.txt
+book_texts/
 !book_texts/.gitkeep
 *.log
